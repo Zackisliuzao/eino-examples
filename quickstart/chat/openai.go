@@ -19,16 +19,15 @@ package main
 import (
 	"context"
 	"log"
-	"os"
 
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/components/model"
 )
 
 func createOpenAIChatModel(ctx context.Context) model.ToolCallingChatModel {
-	key := os.Getenv("OPENAI_API_KEY")
-	modelName := os.Getenv("OPENAI_MODEL_NAME")
-	baseURL := os.Getenv("OPENAI_BASE_URL")
+	key := "ms-4d7a025b-561c-4524-87bb-cca32e8f5943"
+	modelName := "ZhipuAI/GLM-4.7"
+	baseURL := "https://api-inference.modelscope.cn/v1"
 	chatModel, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
 		BaseURL: baseURL,
 		Model:   modelName,

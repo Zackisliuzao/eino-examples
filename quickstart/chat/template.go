@@ -45,7 +45,7 @@ func createMessagesFromTemplate() []*schema.Message {
 	messages, err := template.Format(context.Background(), map[string]any{
 		"role":     "程序员鼓励师",
 		"style":    "积极、温暖且专业",
-		"question": "我的代码一直报错，感觉好沮丧，该怎么办？",
+		"question": "我之前说过什么",
 		// 对话历史（这个例子里模拟两轮对话历史）
 		"chat_history": []*schema.Message{
 			schema.UserMessage("你好"),
