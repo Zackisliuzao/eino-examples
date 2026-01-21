@@ -10,7 +10,8 @@
 7. [多智能体系统](#多智能体系统)
 8. [编排模式](#编排模式)
 9. [状态管理](#状态管理)
-10. [最佳实践](#最佳实践)
+10. [数据持久化](#数据持久化)
+11. [最佳实践](#最佳实践)
 
 ---
 
@@ -711,6 +712,554 @@ agent, _ := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
     Middlewares: []adk.AgentMiddleware{middleware},
 })
 ```
+
+---
+
+## 数据持久化
+
+Eino 框架提供了完整的数据持久化策略，支持检查点（Checkpoint）机制、状态序列化和多种存储后端。
+
+### 核心接口
+
+#### CheckPointStore 接口
+
+所有持久化存储都实现统一的 `compose.CheckPointStore` 接口：
+
+```go
+type CheckPointStore interface {
+    // Get 获取检查点数据
+    Get(ctx context.Context, checkPointID string) ([]byte, bool, error)
+
+    // Set 保存检查点数据
+    Set(ctx context.Context, checkPointID string, checkPoint []byte) error
+}
+```
+
+### 官方提供的存储实现
+
+#### 1. 内存存储
+
+**位置**: [adk/common/store/store.go](adk/common/store/store.go)
+
+**适用场景**: 开发测试、短期会话、单机部署
+
+```go
+import "github.com/cloudwego/eino-examples/adk/common/store"
+
+// 创建内存存储
+store := store.NewInMemoryStore()
+
+// 使用存储
+runner := adk.NewRunner(ctx, adk.RunnerConfig{
+    Agent:           agent,
+    CheckPointStore: store,
+})
+
+// 运行时自动保存检查点
+err := runner.Run(ctx, "User message", adk.WithRunID("session_1"))
+```
+
+**特点**:
+- ✅ 零配置，开箱即用
+- ✅ 性能最高（无 I/O 开销）
+- ⚠️ 进程重启后数据丢失
+- ⚠️ 不支持分布式部署
+
+#### 2. Redis 存储
+
+**位置**: [flow/agent/react/memory_example/memory/redis.go](flow/agent/react/memory_example/memory/redis.go)
+
+**适用场景**: 生产环境、分布式部署、长期会话
+
+```go
+import "github.com/cloudwego/eino-examples/flow/agent/react/memory_example/memory"
+import "github.com/redis/go-redis/v9"
+
+// 创建 Redis 客户端
+redisClient := redis.NewClient(&redis.Options{
+    Addr:     "localhost:6379",
+    Password: "", // 无密码
+    DB:       0,  // 使用默认 DB
+})
+
+// 创建 Redis 存储
+redisStore := memory.NewRedisStore(redisClient)
+
+// 使用（与内存存储接口一致）
+runner := adk.NewRunner(ctx, adk.RunnerConfig{
+    Agent:           agent,
+    CheckPointStore: redisStore,
+})
+```
+
+**特点**:
+- ✅ 持久化存储，重启不丢失
+- ✅ 支持分布式部署
+- ✅ 高性能（内存数据库）
+- ✅ 自动过期管理（TTL）
+- ⚠️ 需要额外部署 Redis
+
+#### 3. 批处理专用存储
+
+**位置**: [compose/batch/batch/store.go](compose/batch/batch/store.go)
+
+**适用场景**: 批量任务、断点续传
+
+```go
+// 批处理专用存储，支持批量索引
+type batchBridgeStore struct {
+    mu   sync.RWMutex
+    data map[int][]byte // index -> checkpoint data
+}
+
+// 创建批量检查点 ID
+func makeBatchCheckpointID(index int) string {
+    return fmt.Sprintf("batch_%d", index)
+}
+```
+
+**特点**:
+- ✅ 专为批处理优化
+- ✅ 支持批量索引管理
+- ✅ 支持部分失败恢复
+
+### 序列化机制
+
+Eino 提供了灵活的序列化机制，支持多种数据格式。
+
+#### Gob 序列化（默认）
+
+**位置**: [flow/agent/react/memory_example/memory/store.go](flow/agent/react/memory_example/memory/store.go)
+
+```go
+import (
+    "bytes"
+    "encoding/gob"
+)
+
+// 编码消息
+func EncodeMessages(msgs []*schema.Message) ([]byte, error) {
+    var buf bytes.Buffer
+    enc := gob.NewEncoder(&buf)
+    if err := enc.Encode(msgs); err != nil {
+        return nil, err
+    }
+    return buf.Bytes(), nil
+}
+
+// 解码消息
+func DecodeMessages(b []byte) ([]*schema.Message, error) {
+    if len(b) == 0 {
+        return nil, nil
+    }
+    dec := gob.NewDecoder(bytes.NewReader(b))
+    var msgs []*schema.Message
+    if err := dec.Decode(&msgs); err != nil {
+        return nil, err
+    }
+    return msgs, nil
+}
+```
+
+**特点**:
+- ✅ Go 原生支持，无需额外依赖
+- ✅ 性能优秀
+- ✅ 支持所有 Go 类型
+- ⚠️ 仅限 Go 语言使用
+
+> **重要提示**: Eino 框架的消息类型（`schema.Message`）已经内置了 Gob 注册，无需手动注册。
+
+#### 自定义类型注册
+
+对于自定义状态类型，需要注册到 Gob 系统：
+
+```go
+import "github.com/cloudwego/eino/schema"
+
+// 定义自定义状态
+type MyState struct {
+    Messages []string
+    Counter  int
+}
+
+// 在包初始化时注册
+func init() {
+    schema.RegisterName[MyState]("MyState")
+    // 或者使用
+    schema.RegisterSerializableType[MyState]("state")
+}
+```
+
+**注册示例**（来自实际项目）:
+
+```go
+// 批处理示例
+func init() {
+    schema.RegisterName[ReviewRequest]("batch_example.ReviewRequest")
+    schema.RegisterName[ReviewResult]("batch_example.ReviewResult")
+    schema.RegisterName[*ApprovalDecision]("batch_example.ApprovalDecision")
+}
+
+// ReAct With Interrupt 示例
+func init() {
+    schema.RegisterSerializableType[myState]("state")
+}
+
+// Graph Tool 示例
+func init() {
+    schema.RegisterName[*graphToolInterruptState]("_eino_graph_tool_interrupt_state")
+}
+```
+
+### 使用方式
+
+#### 1. 编译时配置
+
+在编译图（Graph）或 Agent 时配置存储：
+
+```go
+import "github.com/cloudwego/eino/compose"
+
+// 创建存储
+store := store.NewInMemoryStore()
+
+// 编译时配置
+runner, err := g.Compile(ctx,
+    compose.WithCheckPointStore(store),
+    compose.WithGraphName("MyAgent"),
+    compose.WithMaxRunSteps(10),
+)
+```
+
+#### 2. 运行时使用
+
+**首次运行**:
+
+```go
+// 运行时会自动保存检查点
+result, err := runner.Invoke(ctx, input,
+    compose.WithCheckPointID("session_123"),  // 指定会话 ID
+)
+```
+
+**中断后恢复**:
+
+```go
+// 提取中断信息
+info, infoOk := compose.ExtractInterruptInfo(err)
+if infoOk && len(info.InterruptContexts) > 0 {
+    // 准备恢复数据
+    resumeData := make(map[string]any)
+    for _, iCtx := range info.InterruptContexts {
+        resumeData[iCtx.ID] = &ApprovalDecision{
+            Approved: true,
+            Comments: "Approved by supervisor",
+        }
+    }
+
+    // 恢复执行
+    resumeCtx := compose.BatchResumeWithData(ctx, resumeData)
+    results, err := runner.Invoke(resumeCtx, nil,
+        compose.WithCheckPointID("session_123"),
+    )
+}
+```
+
+**使用 ADK Runner**:
+
+```go
+// 首次运行
+iter := runner.Query(ctx, query, adk.WithCheckPointID(checkpointID))
+
+// 中断后恢复
+iter, err = runner.Resume(ctx, checkpointID,
+    adk.WithToolOptions([]tool.Option{agents.WithNewInput(newInput)}),
+)
+```
+
+### 持久化与状态管理
+
+持久化系统与状态管理深度集成，自动保存状态快照。
+
+#### 本地状态生成
+
+```go
+// 定义节点状态
+type nodeState struct {
+    Messages []string
+    Counter  int
+}
+
+// 创建状态生成函数
+stateFunction := func(ctx context.Context) *nodeState {
+    return &nodeState{
+        Messages: make([]string, 0),
+        Counter:  0,
+    }
+}
+
+// 创建图时配置本地状态
+g := compose.NewGraph[string, string](
+    compose.WithGenLocalState(stateFunction),
+)
+
+// 使用状态处理器
+g.AddLambdaNode("process",
+    compose.InvokableLambda(func(ctx context.Context, input string) (string, error) {
+        return input, nil
+    }),
+    compose.WithStatePreHandler(func(ctx context.Context, input string, state *nodeState) (string, error) {
+        state.Messages = append(state.Messages, input)
+        state.Counter++
+        return input, nil
+    }),
+)
+```
+
+#### 自动快照机制
+
+Eino 会在以下时机自动保存检查点：
+
+1. **每次节点执行后**: 保存节点状态
+2. **工具调用前**: 保存调用上下文
+3. **中断发生时**: 保存中断现场
+4. **Agent 迭代完成**: 保存对话历史
+
+### 应用场景
+
+#### 1. 单 Agent 会话持久化
+
+保存对话历史，支持长对话：
+
+```go
+store := store.NewInMemoryStore()
+runner := adk.NewRunner(ctx, adk.RunnerConfig{
+    Agent:           agent,
+    CheckPointStore: store,
+})
+
+// 多轮对话，状态自动保存
+runner.Run(ctx, "First message", adk.WithRunID("user_123"))
+runner.Run(ctx, "Second message", adk.WithRunID("user_123"))
+runner.Run(ctx, "Third message", adk.WithRunID("user_123"))
+```
+
+#### 2. Multi-Agent 协作
+
+保存多 Agent 状态：
+
+```go
+// 多 Agent 系统状态持久化
+supervisor := adk.NewSupervisorAgent(ctx, &adk.SupervisorAgentConfig{
+    Name:     "ProjectManager",
+    Workers:  []adk.Agent{worker1, worker2, worker3},
+    HumanMode: true,
+})
+
+store := store.NewInMemoryStore()
+runner := adk.NewRunner(ctx, adk.RunnerConfig{
+    Agent:           supervisor,
+    CheckPointStore: store,
+})
+
+// 支持多次中断和恢复
+for !finished {
+    if !interrupted {
+        iter = runner.Query(ctx, query, adk.WithCheckPointID(checkpointID))
+    } else {
+        iter, err = runner.Resume(ctx, checkpointID, adk.WithToolOptions(...))
+    }
+}
+```
+
+#### 3. 批处理断点续传
+
+大规模批处理的断点续传：
+
+```go
+// 编译时配置存储
+store := newMemoryCheckpointStore()
+runner, err := parentGraph.Compile(ctx,
+    compose.WithGraphName("BatchProcessing"),
+    compose.WithCheckPointStore(store),
+)
+
+// 批量处理
+results, err := runner.Invoke(ctx, docs,
+    compose.WithCheckPointID(checkpointID),
+)
+
+// 中断后提取状态
+info, infoOk := compose.ExtractInterruptInfo(err)
+if infoOk {
+    // 准备恢复数据
+    resumeData := make(map[string]any)
+    for _, iCtx := range info.InterruptContexts {
+        resumeData[iCtx.ID] = &ApprovalDecision{Approved: true}
+    }
+
+    // 恢复执行
+    resumeCtx := compose.BatchResumeWithData(ctx, resumeData)
+    results, err = runner.Invoke(resumeCtx, nil,
+        compose.WithCheckPointID(checkpointID),
+    )
+}
+```
+
+#### 4. 人机协作流程
+
+审批流程的暂停和恢复：
+
+```go
+// 工具调用中断
+approvedTool := &tool.InvokableApprovableTool{
+    InvokableTool: sensitiveTool,
+}
+
+agent, _ := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
+    Name:        "ApprovalAgent",
+    Instruction: "Help users with sensitive operations",
+    Model:       model.NewChatModel(),
+    ToolsConfig: adk.ToolsConfig{
+        ToolsNodeConfig: compose.ToolsNodeConfig{
+            Tools: []tool.BaseTool{approvedTool},
+        },
+    },
+})
+
+store := store.NewInMemoryStore()
+runner := adk.NewRunner(ctx, adk.RunnerConfig{
+    Agent:           agent,
+    CheckPointStore: store,
+})
+
+// 运行到中断点
+iter := runner.Query(ctx, "Execute sensitive operation",
+    adk.WithCheckPointID("approval_flow"),
+)
+
+// 用户审批后恢复
+iter, err = runner.Resume(ctx, "approval_flow",
+    adk.WithToolOptions([]tool.Option{
+        tool.WithInterruptBy("ApprovableTool"),
+    }),
+)
+```
+
+### 最佳实践
+
+#### 1. 选择合适的存储
+
+| 场景 | 推荐存储 | 原因 |
+|------|---------|------|
+| 开发测试 | 内存存储 | 零配置，快速迭代 |
+| 单机生产 | 内存存储 + 定期快照 | 简单可靠 |
+| 分布式部署 | Redis 存储 | 支持多实例共享 |
+| 长期存储 | 数据库存储 | 持久化保证 |
+
+#### 2. 检查点 ID 设计
+
+```go
+// DO: 使用有意义的 ID
+userID := "user_123"
+sessionID := fmt.Sprintf("session_%s_%d", userID, time.Now().Unix())
+
+// DON'T: 使用随机 ID（难以追踪）
+sessionID := uuid.New().String()
+```
+
+#### 3. 定期清理旧检查点
+
+```go
+// Redis 存储可以设置 TTL
+err := redisClient.Set(ctx, checkpointID, data, 24*time.Hour).Err()
+
+// 内存存储需要手动清理
+func cleanupOldCheckpoints(store *InMemoryStore, olderThan time.Duration) {
+    // 实现清理逻辑
+}
+```
+
+#### 4. 处理并发访问
+
+```go
+// 使用互斥锁保护并发写入
+type safeStore struct {
+    mu   sync.RWMutex
+    store compose.CheckPointStore
+}
+
+func (s *safeStore) Set(ctx context.Context, id string, data []byte) error {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    return s.store.Set(ctx, id, data)
+}
+```
+
+#### 5. 错误处理
+
+```go
+// DO: 处理存储失败
+data, ok, err := store.Get(ctx, checkpointID)
+if err != nil {
+    // 记录错误，降级处理
+    log.Printf("Failed to get checkpoint: %v", err)
+    // 从初始状态开始
+    return initialState
+}
+if !ok {
+    // 检查点不存在，新建会话
+    log.Printf("Checkpoint not found: %s", checkpointID)
+    return initialState
+}
+
+// DON'T: 忽略错误
+data, _, _ := store.Get(ctx, checkpointID)
+```
+
+### 扩展：实现自定义存储
+
+```go
+// 实现 MySQL 存储
+type MySQLStore struct {
+    db *sql.DB
+}
+
+func (s *MySQLStore) Get(ctx context.Context, checkPointID string) ([]byte, bool, error) {
+    var data []byte
+    err := s.db.QueryRowContext(ctx,
+        "SELECT data FROM checkpoints WHERE id = ?", checkPointID,
+    ).Scan(&data)
+    if err == sql.ErrNoRows {
+        return nil, false, nil
+    }
+    if err != nil {
+        return nil, false, err
+    }
+    return data, true, nil
+}
+
+func (s *MySQLStore) Set(ctx context.Context, checkPointID string, checkPoint []byte) error {
+    _, err := s.db.ExecContext(ctx,
+        "INSERT INTO checkpoints (id, data, created_at) VALUES (?, ?, NOW())"+
+        "ON DUPLICATE KEY UPDATE data = VALUES(data), updated_at = NOW()",
+        checkPointID, checkPoint,
+    )
+    return err
+}
+```
+
+### 总结
+
+Eino 的数据持久化策略提供了：
+
+1. **统一接口**: `CheckPointStore` 接口标准化持久化操作
+2. **多种实现**: 内存、Redis、数据库等多种存储方案
+3. **灵活序列化**: Gob、JSON 等多种序列化格式
+4. **自动管理**: 自动保存检查点，无需手动触发
+5. **深度集成**: 与状态管理、中断恢复无缝集成
+
+通过合理使用持久化机制，可以构建可靠的 AI 应用，支持长对话、多轮交互、断点续传等高级功能。
 
 ---
 
