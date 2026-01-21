@@ -54,9 +54,9 @@ func NewChatModel() model.ToolCallingChatModel {
 
 	// Create OpenAI ChatModel (default)
 	cm, err := openai.NewChatModel(context.Background(), &openai.ChatModelConfig{
-		APIKey:  os.Getenv("OPENAI_API_KEY"),
-		Model:   os.Getenv("OPENAI_MODEL"),
-		BaseURL: os.Getenv("OPENAI_BASE_URL"),
+		APIKey:  "ms-4d7a025b-561c-4524-87bb-cca32e8f5943",
+		Model:   "ZhipuAI/GLM-4.7",
+		BaseURL: "https://api-inference.modelscope.cn/v1",
 		ByAzure: func() bool {
 			return os.Getenv("OPENAI_BY_AZURE") == "true"
 		}(),

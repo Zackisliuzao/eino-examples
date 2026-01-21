@@ -71,7 +71,15 @@ func (i InvokableApprovableTool) InvokableRun(ctx context.Context, argumentsInJS
 	isResumeTarget, hasData, data := tool.GetResumeContext[*ApprovalResult](ctx)
 	if isResumeTarget && hasData {
 		if data.Approved {
-			return i.InvokableTool.InvokableRun(ctx, storedArguments, opts...)
+			cleanedArgs := storedArguments
+			if len(cleanedArgs) > 2 && cleanedArgs[len(cleanedArgs)-2:] == "{}" {
+				// Check if the part before {} is valid JSON
+				potentialValid := cleanedArgs[:len(cleanedArgs)-2]
+				if potentialValid[len(potentialValid)-1] == '}' || potentialValid[len(potentialValid)-1] == ']' {
+					cleanedArgs = potentialValid
+				}
+			}
+			return i.InvokableTool.InvokableRun(ctx, cleanedArgs, opts...)
 		}
 
 		if data.DisapproveReason != nil {
