@@ -20,29 +20,17 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 
+	"github.com/cloudwego/eino-examples/adk/common/model"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
-
-	"github.com/cloudwego/eino-ext/components/model/openai"
 )
 
 func main() {
 	ctx := context.Background()
 
 	// 初始化模型
-	model, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
-		APIKey:  os.Getenv("OPENAI_API_KEY"),
-		Model:   os.Getenv("OPENAI_MODEL"),
-		BaseURL: os.Getenv("OPENAI_BASE_URL"),
-		ByAzure: func() bool {
-			return os.Getenv("OPENAI_BY_AZURE") == "true"
-		}(),
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
+	model := model.NewChatModel()
 
 	// 创建 ChatModelAgent
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
@@ -63,7 +51,7 @@ func main() {
 
 	// 执行对话
 	input := []adk.Message{
-		schema.UserMessage("Hello, please introduce yourself."),
+		schema.UserMessage("你好，介绍你自己"),
 	}
 
 	events := runner.Run(ctx, input)
