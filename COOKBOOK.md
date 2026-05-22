@@ -48,6 +48,21 @@
 | [adk/multiagent/deep](https://github.com/cloudwego/eino-examples/tree/main/adk/multiagent/deep) | Deep Agents (Excel Agent) | 智能 Excel 助手，分步骤理解和处理 Excel 文件，支持 Python 代码执行 |
 | [adk/multiagent/integration-excel-agent](https://github.com/cloudwego/eino-examples/tree/main/adk/multiagent/integration-excel-agent) | Excel Agent (ADK 集成版) | ADK 集成版 Excel Agent，包含 Planner、Executor、Replanner、Reporter |
 
+### Agent
+| 目录 | 名称 | 说明 |
+|------|------|------|
+| [adk/agent/ralph-loop](https://github.com/cloudwego/eino-examples/tree/main/adk/agent/ralph-loop) | Ralph Loop | 自主迭代模式：外部 `for` 循环配合 `Runner.Run` 实现单轮迭代，Agent 通过文件系统感知先前工作，验证门控检查 BUG 标记后才接受完成承诺 |
+
+### Cancel (取消)
+| 目录 | 名称 | 说明 |
+|------|------|------|
+| [adk/cancel/graceful-exit](https://github.com/cloudwego/eino-examples/tree/main/adk/cancel/graceful-exit) | Graceful Exit | 演示 Agent Cancel + Resume：捕获终端信号后以 `CancelAfterChatModel` + `WithRecursive` 模式取消嵌套 Agent，等待安全点保存 Checkpoint，然后恢复继续执行 |
+
+### Middlewares (中间件)
+| 目录 | 名称 | 说明 |
+|------|------|------|
+| [adk/middlewares/skill](https://github.com/cloudwego/eino-examples/tree/main/adk/middlewares/skill) | Skill 中间件 | 从文件系统加载 Agent 技能（如 log_analyzer），展示技能中间件的使用方式 |
+
 ### GraphTool (图工具)
 | 目录 | 名称 | 说明 |
 |------|------|------|
@@ -164,6 +179,7 @@
 | [quickstart/chat](https://github.com/cloudwego/eino-examples/tree/main/quickstart/chat) | Chat 快速开始 | 最基础的 LLM 对话示例，包含模板、生成、流式输出 |
 | [quickstart/eino_assistant](https://github.com/cloudwego/eino-examples/tree/main/quickstart/eino_assistant) | Eino 助手 | 完整的 RAG 应用示例，包含知识索引、Agent 服务、Web 界面 |
 | [quickstart/todoagent](https://github.com/cloudwego/eino-examples/tree/main/quickstart/todoagent) | Todo Agent | 简单的 Todo 管理 Agent 示例 |
+| [quickstart/chatwitheino](https://github.com/cloudwego/eino-examples/tree/main/quickstart/chatwitheino) | Chat with Eino (教程) | 9 章渐进式教程，从 ChatModel → Runner → Session → Tool → Middleware → Callback → Interrupt → GraphTool → Skill，逐步构建完整 Agent |
 
 ---
 
